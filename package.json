@@ -1,6 +1,6 @@
 {
   "name": "@leasebase/service-common",
-  "version": "0.0.0-development",
+  "version": "1.0.0",
   "description": "Shared middleware, utilities and types for LeaseBase microservices",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
