@@ -9,6 +9,9 @@ on:
       - 'package-lock.json'
       - 'tsconfig.json'
       - '.releaserc.json'
+      - 'vitest.config.ts'
+      - '.github/workflows/**'
+  workflow_dispatch:
 
 permissions:
   contents: write
