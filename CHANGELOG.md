@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/leasebase/leasebase-service-common/compare/v1.0.0...v1.0.1) (2026-03-07)
+
+
+### Bug Fixes
+
+* **jwt:** make verifyToken token-type aware for Cognito access tokens ([e470305](https://github.com/leasebase/leasebase-service-common/commit/e4703054d2e3ff3bb1946bb88da65d3b10007e16))
+
 # 1.0.0 (2026-03-05)
 
 
