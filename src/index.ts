@@ -28,7 +28,7 @@ export {
 } from './errors';
 
 // JWT
-export { verifyToken, getJwtConfig, resetJwksCache } from './jwt-verifier';
+export { verifyToken, getJwtConfig, resetJwksCache, setJwksForTesting } from './jwt-verifier';
 export type { JwtConfig, VerifiedToken } from './jwt-verifier';
 
 // Middleware
