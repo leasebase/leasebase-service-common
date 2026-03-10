@@ -3,6 +3,12 @@ import { logger } from './logger';
 
 let pool: Pool | null = null;
 
+/**
+ * Resolved DB configuration, cached after first resolution.
+ * Populated by initDb() (async path) or getDbConfig() (sync path).
+ */
+let resolvedConfig: DbConfig | null = null;
+
 export interface DbConfig {
   connectionString?: string;
   host?: string;
@@ -14,82 +20,181 @@ export interface DbConfig {
   ssl?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Configuration resolution
+// ---------------------------------------------------------------------------
+
 /**
- * Resolve database connection configuration.
+ * Parse a JSON secret value (as injected by ECS `secrets` or Secrets Manager).
  *
- * Priority:
- *   1. `DATABASE_URL`              — explicit connection string
- *   2. `DATABASE_SECRET_ARN`       — ECS-injected JSON secret payload
- *      (Despite the name, ECS injects the secret VALUE as JSON, not the ARN.)
- *      Expected shape: { host, port, dbname, username, password, schema? }
- *   3. Individual env vars         — DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
- *      (Intended for local development; defaults to localhost.)
- *
- * In non-local environments (NODE_ENV is set and not "development"), if none of
- * the above are configured the function logs an error so the failure is visible
- * rather than silently falling back to localhost.
+ * Expected payload:
+ * ```json
+ * { "host": "…", "port": 5432, "dbname": "…", "username": "…", "password": "…", "schema": "…" }
+ * ```
  */
-export function getDbConfig(): DbConfig {
-  // ── Priority 1: explicit connection string ────────────────────────────
-  if (process.env.DATABASE_URL) {
-    logger.info('DB config: using DATABASE_URL');
-    return {
-      connectionString: process.env.DATABASE_URL,
-      schema: process.env.DATABASE_SCHEMA,
-    };
+function parseDbSecretJson(raw: string): DbConfig {
+  let secret: Record<string, unknown>;
+  try {
+    secret = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse DATABASE_SECRET_ARN value as JSON: ${err}`);
   }
 
-  // ── Priority 2: ECS-injected JSON secret ──────────────────────────────
-  const secretPayload = process.env.DATABASE_SECRET_ARN;
-  if (secretPayload) {
-    try {
-      const secret = JSON.parse(secretPayload) as Record<string, unknown>;
-      const config: DbConfig = {
-        host: String(secret.host ?? ''),
-        port: Number(secret.port) || 5432,
-        database: String(secret.dbname ?? secret.database ?? 'leasebase'),
-        user: String(secret.username ?? secret.user ?? ''),
-        password: String(secret.password ?? ''),
-        schema: String(secret.schema ?? '') || process.env.DATABASE_SCHEMA,
-        ssl: secret.ssl !== false, // default true for RDS / Aurora
-      };
-      logger.info(
-        { host: config.host, database: config.database, user: config.user, schema: config.schema },
-        'DB config: resolved from DATABASE_SECRET_ARN',
-      );
-      return config;
-    } catch (err) {
-      logger.error({ err }, 'DB config: failed to parse DATABASE_SECRET_ARN as JSON');
-      throw new Error('DATABASE_SECRET_ARN is set but could not be parsed as JSON');
-    }
-  }
+  const host = secret.host as string | undefined;
+  const port = Number(secret.port) || 5432;
+  const database = (secret.dbname as string) || (secret.database as string) || undefined;
+  const user = (secret.username as string) || (secret.user as string) || undefined;
+  const password = secret.password as string | undefined;
+  const schema = (secret.schema as string) || process.env.DATABASE_SCHEMA;
 
-  // ── Priority 3: individual env vars (local development) ───────────────
-  const isLocal = !process.env.NODE_ENV || process.env.NODE_ENV === 'development';
-  if (!isLocal && !process.env.DB_HOST) {
-    logger.error(
-      'DB config: no DATABASE_URL, DATABASE_SECRET_ARN, or DB_HOST configured in a ' +
-        `non-local environment (NODE_ENV=${process.env.NODE_ENV}). ` +
-        'Database connections will fail. Set one of these before deploying.',
+  if (!host || !user) {
+    throw new Error(
+      'DATABASE_SECRET_ARN secret is missing required fields (host, username). ' +
+        `Received keys: ${Object.keys(secret).join(', ')}`,
     );
   }
 
-  const config: DbConfig = {
-    host: process.env.DB_HOST || 'localhost',
-    port: Number(process.env.DB_PORT) || 5432,
-    database: process.env.DB_NAME || 'leasebase',
-    user: process.env.DB_USER || 'leasebase_admin',
-    password: process.env.DB_PASSWORD || '',
-    schema: process.env.DATABASE_SCHEMA,
-    ssl: process.env.DB_SSL === 'true',
-  };
+  logger.info(
+    { host, port, database, schema: schema || '(default)', user },
+    'Database config resolved from secret',
+  );
 
-  if (isLocal) {
-    logger.info({ host: config.host, database: config.database }, 'DB config: using local env vars');
+  return { host, port, database, user, password, schema, ssl: true };
+}
+
+/**
+ * Resolve DATABASE_SECRET_ARN at runtime via AWS Secrets Manager.
+ * Used when the env var contains an actual ARN (e.g. local dev against a real DB).
+ */
+async function resolveSecretArn(arn: string): Promise<DbConfig> {
+  // Dynamic import so that @aws-sdk/client-secrets-manager is only loaded when needed.
+  const { SecretsManagerClient, GetSecretValueCommand } = await import(
+    '@aws-sdk/client-secrets-manager'
+  );
+
+  logger.info('Resolving database credentials from Secrets Manager');
+
+  const client = new SecretsManagerClient({});
+  const response = await client.send(new GetSecretValueCommand({ SecretId: arn }));
+
+  if (!response.SecretString) {
+    throw new Error('DATABASE_SECRET_ARN resolved but SecretString is empty');
   }
 
-  return config;
+  return parseDbSecretJson(response.SecretString);
 }
+
+/**
+ * Synchronous DB config resolution.
+ *
+ * Priority:
+ *   1. DATABASE_URL  → connection-string mode
+ *   2. DATABASE_SECRET_ARN containing JSON → parsed secret (ECS-injected)
+ *   3. Explicit DB_HOST / DB_USER / DB_PASSWORD env vars
+ *   4. Localhost fallback (development / test only)
+ *
+ * In non-local environments (NODE_ENV not in development|test and not empty),
+ * the function will throw if no explicit config is found — preventing silent
+ * fallback to localhost.
+ */
+function getDbConfig(): DbConfig {
+  // Use cached config if already resolved (e.g. by initDb)
+  if (resolvedConfig) return resolvedConfig;
+
+  // 1. CONNECTION STRING
+  if (process.env.DATABASE_URL) {
+    resolvedConfig = {
+      connectionString: process.env.DATABASE_URL,
+      schema: process.env.DATABASE_SCHEMA,
+    };
+    return resolvedConfig;
+  }
+
+  // 2. SECRET (ECS-injected JSON value)
+  const secretValue = process.env.DATABASE_SECRET_ARN;
+  if (secretValue) {
+    // If it looks like JSON, parse it directly (ECS pre-resolved the secret).
+    if (secretValue.trimStart().startsWith('{')) {
+      resolvedConfig = parseDbSecretJson(secretValue);
+      return resolvedConfig;
+    }
+    // If it looks like an ARN, we cannot resolve it synchronously.
+    // The caller must use initDb() first.
+    throw new Error(
+      'DATABASE_SECRET_ARN contains an ARN but initDb() was not called. ' +
+        'Call await initDb() at service startup before using the database.',
+    );
+  }
+
+  // 3. EXPLICIT ENV VARS
+  if (process.env.DB_HOST) {
+    resolvedConfig = {
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT) || 5432,
+      database: process.env.DB_NAME || 'leasebase',
+      user: process.env.DB_USER || 'leasebase_admin',
+      password: process.env.DB_PASSWORD || '',
+      schema: process.env.DATABASE_SCHEMA,
+      ssl: process.env.DB_SSL === 'true',
+    };
+    return resolvedConfig;
+  }
+
+  // 4. LOCAL FALLBACK — only allowed in dev / test
+  const env = process.env.NODE_ENV || '';
+  const isLocal = !env || env === 'development' || env === 'test';
+
+  if (!isLocal) {
+    throw new Error(
+      'FATAL: No database configuration found. In non-local environments, ' +
+        'set DATABASE_URL, DATABASE_SECRET_ARN, or DB_HOST/DB_USER/DB_PASSWORD. ' +
+        `Current NODE_ENV=${env}`,
+    );
+  }
+
+  resolvedConfig = {
+    host: 'localhost',
+    port: 5432,
+    database: 'leasebase',
+    user: 'leasebase_admin',
+    password: '',
+    schema: process.env.DATABASE_SCHEMA,
+    ssl: false,
+  };
+  return resolvedConfig;
+}
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-initialize the database pool.
+ *
+ * **Must** be called (and awaited) at service startup when DATABASE_SECRET_ARN
+ * contains an ARN that needs runtime resolution via Secrets Manager.
+ *
+ * Safe to call multiple times — subsequent calls are no-ops.
+ * Safe to skip if DATABASE_URL, ECS-injected JSON, or explicit env vars are used.
+ */
+export async function initDb(): Promise<void> {
+  if (pool) return; // already initialised
+
+  // Resolve config asynchronously when an ARN needs Secrets Manager lookup.
+  if (!resolvedConfig) {
+    const secretValue = process.env.DATABASE_SECRET_ARN;
+    if (secretValue && !secretValue.trimStart().startsWith('{')) {
+      resolvedConfig = await resolveSecretArn(secretValue);
+    }
+  }
+
+  // Eagerly create the pool so that getPool() is safe to call synchronously.
+  getPool();
+}
+
+// ---------------------------------------------------------------------------
+// Pool management
+// ---------------------------------------------------------------------------
 
 export function getPool(): Pool {
   if (!pool) {
@@ -119,7 +224,10 @@ export function getPool(): Pool {
       });
     }
 
-    logger.info({ host: config.host || '(connection-string)', schema: config.schema }, 'Database pool created');
+    logger.info(
+      { host: config.host || 'url', schema: config.schema },
+      'Database pool created',
+    );
   }
 
   return pool;
@@ -140,6 +248,7 @@ export async function closePool(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = null;
+    resolvedConfig = null;
   }
 }
 
