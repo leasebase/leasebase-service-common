@@ -28,3 +28,4 @@ coverage/
 *.swp
 *.swo
 *~
+leasebase-service-common-*.tgz
