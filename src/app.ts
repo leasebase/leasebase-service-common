@@ -6,6 +6,7 @@ import { requestLogger } from './middleware/request-logger';
 import { createRateLimiter } from './middleware/rate-limit';
 import { errorHandler } from './middleware/error-handler';
 import { healthRoutes, type HealthCheck } from './health';
+import { initDb } from './db';
 import { logger } from './logger';
 
 export interface CreateAppOptions {
@@ -66,10 +67,20 @@ export function registerErrorHandler(app: Express): void {
 
 /**
  * Starts the Express app on the configured port.
+ *
+ * Automatically calls initDb() to resolve database credentials
+ * (e.g. from DATABASE_SECRET_ARN) before the server begins accepting requests.
  */
-export function startApp(app: Express): void {
+export async function startApp(app: Express): Promise<void> {
   const port = Number(process.env.PORT) || 3000;
   const serviceName = process.env.SERVICE_NAME || 'unknown';
+
+  // Pre-resolve DB credentials (safe no-op when no DB config is present)
+  try {
+    await initDb();
+  } catch (err) {
+    logger.warn({ err }, 'Database initialization skipped or failed — service will start without a DB pool');
+  }
 
   registerErrorHandler(app);
 
