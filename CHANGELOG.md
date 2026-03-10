@@ -1,3 +1,17 @@
+## [1.1.1](https://github.com/leasebase/leasebase-service-common/compare/v1.1.0...v1.1.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* **jwt:** accept COGNITO_WEB_CLIENT_ID as fallback for COGNITO_CLIENT_ID ([#5](https://github.com/leasebase/leasebase-service-common/issues/5)) ([6f97b3f](https://github.com/leasebase/leasebase-service-common/commit/6f97b3f1e0323f021e4d8e8f4dbc6cab82020df4))
+
+# [1.1.0](https://github.com/leasebase/leasebase-service-common/compare/v1.0.1...v1.1.0) (2026-03-09)
+
+
+### Features
+
+* **service-common:** honor BFF enriched role header after JWT verification ([#4](https://github.com/leasebase/leasebase-service-common/issues/4)) ([71149b0](https://github.com/leasebase/leasebase-service-common/commit/71149b0d0e028b4a51e9e665ef30c1294c7ab572))
+
 ## [1.0.1](https://github.com/leasebase/leasebase-service-common/compare/v1.0.0...v1.0.1) (2026-03-07)
 
 

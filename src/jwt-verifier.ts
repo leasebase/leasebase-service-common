@@ -45,7 +45,8 @@ function getJwksUrl(config: JwtConfig): URL {
 export function getJwtConfig(): JwtConfig {
   const region = process.env.COGNITO_REGION || 'us-west-2';
   const userPoolId = process.env.COGNITO_USER_POOL_ID || '';
-  const clientId = process.env.COGNITO_CLIENT_ID || '';
+  // Accept both COGNITO_CLIENT_ID (canonical) and COGNITO_WEB_CLIENT_ID (legacy IaC name)
+  const clientId = process.env.COGNITO_CLIENT_ID || process.env.COGNITO_WEB_CLIENT_ID || '';
   return { region, userPoolId, clientId };
 }
 
