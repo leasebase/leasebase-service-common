@@ -75,15 +75,6 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
         scopes: payload.scope ? payload.scope.split(' ') : [],
       };
 
-      // BFF role enrichment: if the BFF gateway resolved the user's role from
-      // the database, prefer that over the JWT-derived default.  This header is
-      // stripped from external requests by the BFF, so it can only originate
-      // from the trusted gateway layer.
-      const enrichedRole = req.headers['x-lb-enriched-role'] as string | undefined;
-      if (enrichedRole) {
-        authReq.user.role = enrichedRole.toUpperCase() as UserRole;
-      }
-
       next();
     } catch (err) {
       if (err instanceof UnauthorizedError) {
