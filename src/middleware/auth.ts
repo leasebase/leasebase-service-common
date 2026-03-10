@@ -53,11 +53,11 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
       const token = authHeader.slice(7);
       const payload = await verifyToken(token);
 
-      // Determine role: prefer JWT claim, then BFF-enriched header.
-      // Fail closed: if neither source provides a role, reject the request.
+      // Determine role: prefer BFF-enriched header (DB source of truth),
+      // then JWT claim. Fail closed if neither provides a role.
       const jwtRole = payload['custom:role'] as string | undefined;
       const enrichedRole = req.headers['x-lb-enriched-role'] as string | undefined;
-      const rawRole = jwtRole || enrichedRole;
+      const rawRole = enrichedRole || jwtRole;
 
       if (!rawRole) {
         throw new UnauthorizedError('Unable to determine user role');

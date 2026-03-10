@@ -2,10 +2,12 @@
  * Tests for requireAuth enriched-role resolution.
  *
  * Verifies that when JWT custom:role is absent, the middleware uses
- * the BFF-set x-lb-enriched-role header before falling back to TENANT.
+ * the BFF-set x-lb-enriched-role header (fail-closed: no TENANT fallback).
  *
- * Also verifies that when JWT custom:role IS present, it takes precedence
- * over the enriched header (JWT is authoritative when available).
+ * When both JWT custom:role AND enriched header are present, the enriched
+ * header takes priority because the BFF resolves it from the DB (source of
+ * truth). The BFF strips this header from external requests, so it can only
+ * originate from the trusted gateway layer.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -37,7 +39,7 @@ describe('requireAuth — enriched role resolution', () => {
     mockVerifyToken.mockReset();
   });
 
-  it('uses JWT custom:role when present (ignores enriched header)', async () => {
+  it('enriched header takes priority over JWT custom:role (DB is source of truth)', async () => {
     mockVerifyToken.mockResolvedValueOnce({
       sub: 'user-1',
       email: 'owner@test.com',
@@ -47,7 +49,7 @@ describe('requireAuth — enriched role resolution', () => {
 
     const req = mockReq({
       authorization: 'Bearer fake-token',
-      'x-lb-enriched-role': 'TENANT',  // should be ignored
+      'x-lb-enriched-role': 'TENANT',  // BFF resolved from DB — takes priority
     });
     const next = vi.fn();
 
@@ -60,7 +62,7 @@ describe('requireAuth — enriched role resolution', () => {
 
     expect(next).toHaveBeenCalledWith();
     const user = (req as unknown as AuthenticatedRequest).user;
-    expect(user.role).toBe(UserRole.OWNER);
+    expect(user.role).toBe(UserRole.TENANT);  // enriched wins
   });
 
   it('uses enriched-role header when JWT custom:role is absent', async () => {
@@ -139,17 +141,18 @@ describe('requireAuth — enriched role resolution', () => {
     expect(user.role).toBe(UserRole.ORG_ADMIN);
   });
 
-  it('does NOT trust enriched-role header for privilege escalation when JWT has explicit claim', async () => {
-    // Scenario: JWT says TENANT, but forged/stale enriched header says ORG_ADMIN
+  it('enriched header overrides JWT claim when DB role differs (e.g. role promotion)', async () => {
+    // Scenario: JWT has stale TENANT role, but DB (via BFF enriched header)
+    // shows user was promoted to ORG_ADMIN. Enriched header wins.
     mockVerifyToken.mockResolvedValueOnce({
       sub: 'user-5',
-      email: 'tenant@test.com',
+      email: 'promoted@test.com',
       'custom:role': 'TENANT',
     });
 
     const req = mockReq({
       authorization: 'Bearer fake-token',
-      'x-lb-enriched-role': 'ORG_ADMIN',  // should be ignored
+      'x-lb-enriched-role': 'ORG_ADMIN',  // BFF resolved from DB
     });
     const next = vi.fn();
 
@@ -162,6 +165,6 @@ describe('requireAuth — enriched role resolution', () => {
 
     expect(next).toHaveBeenCalledWith();
     const user = (req as unknown as AuthenticatedRequest).user;
-    expect(user.role).toBe(UserRole.TENANT);  // JWT claim wins
+    expect(user.role).toBe(UserRole.ORG_ADMIN);  // enriched (DB) wins
   });
 });
