@@ -59,7 +59,8 @@ function parseDbSecretJson(raw: string): DbConfig {
     'Database config resolved from secret',
   );
 
-  return { host, port, database, user, password, schema, ssl: true };
+  const ssl = secret.ssl === false ? false : true;
+  return { host, port, database, user, password, schema, ssl };
 }
 
 /**
@@ -97,7 +98,7 @@ async function resolveSecretArn(arn: string): Promise<DbConfig> {
  * the function will throw if no explicit config is found — preventing silent
  * fallback to localhost.
  */
-function getDbConfig(): DbConfig {
+export function getDbConfig(): DbConfig {
   // Use cached config if already resolved (e.g. by initDb)
   if (resolvedConfig) return resolvedConfig;
 
@@ -248,8 +249,8 @@ export async function closePool(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = null;
-    resolvedConfig = null;
   }
+  resolvedConfig = null;
 }
 
 /** Helper: execute a query with the pool. */

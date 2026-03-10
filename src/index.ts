@@ -48,7 +48,7 @@ export { healthRoutes } from './health';
 export type { HealthCheck } from './health';
 
 // Database
-export { initDb, getPool, checkDbConnection, closePool, query, queryOne } from './db';
+export { getDbConfig, initDb, getPool, checkDbConnection, closePool, query, queryOne } from './db';
 export type { DbConfig } from './db';
 
 // Logger

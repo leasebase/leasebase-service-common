@@ -123,8 +123,13 @@ describe('getDbConfig — DATABASE_SECRET_ARN path', () => {
   });
 
   it('throws when DATABASE_SECRET_ARN is set but not valid JSON', () => {
-    process.env.DATABASE_SECRET_ARN = 'not-json';
-    expect(() => getDbConfig()).toThrow('DATABASE_SECRET_ARN is set but could not be parsed as JSON');
+    process.env.DATABASE_SECRET_ARN = '{not-json';
+    expect(() => getDbConfig()).toThrow('Failed to parse DATABASE_SECRET_ARN value as JSON');
+  });
+
+  it('throws when DATABASE_SECRET_ARN is an ARN (needs initDb)', () => {
+    process.env.DATABASE_SECRET_ARN = 'arn:aws:secretsmanager:us-west-2:123:secret:db-creds';
+    expect(() => getDbConfig()).toThrow('initDb() was not called');
   });
 
   it('does not include password in the returned config info log', () => {
@@ -174,14 +179,11 @@ describe('getDbConfig — individual env vars path', () => {
 // ─── Non-local environment without config ─────────────────────────────────────
 
 describe('getDbConfig — non-local missing config warning', () => {
-  it('logs error when NODE_ENV is non-local and no DB config is set', () => {
+  it('throws when NODE_ENV is non-local and no DB config is set', () => {
     process.env.NODE_ENV = 'dev';
     // No DATABASE_URL, DATABASE_SECRET_ARN, or DB_HOST set.
-    // Should still return localhost defaults but log an error.
-    const config = getDbConfig();
-    expect(config.host).toBe('localhost'); // fallback still works
-    // The key behavior: logger.error is called. We verify structurally
-    // that the function does not throw (graceful) but does return defaults.
+    // Should throw in non-local environments (fail-fast).
+    expect(() => getDbConfig()).toThrow('No database configuration found');
   });
 
   it('does NOT log error when NODE_ENV is development', () => {
