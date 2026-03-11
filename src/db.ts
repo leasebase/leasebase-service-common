@@ -9,6 +9,13 @@ let pool: Pool | null = null;
  */
 let resolvedConfig: DbConfig | null = null;
 
+/**
+ * Per-ARN cache for Secrets Manager lookups.
+ * Keyed by ARN so multiple pools (if ever needed) don't re-fetch,
+ * and password rotation re-resolves only on cache clear.
+ */
+const secretCache = new Map<string, DbConfig>();
+
 export interface DbConfig {
   connectionString?: string;
   host?: string;
@@ -47,9 +54,9 @@ function parseDbSecretJson(raw: string): DbConfig {
   const password = secret.password as string | undefined;
   const schema = (secret.schema as string) || process.env.DATABASE_SCHEMA;
 
-  if (!host || !user) {
+  if (!host || !user || !password) {
     throw new Error(
-      'DATABASE_SECRET_ARN secret is missing required fields (host, username). ' +
+      'DATABASE_SECRET_ARN secret is missing required fields (host, username, password). ' +
         `Received keys: ${Object.keys(secret).join(', ')}`,
     );
   }
@@ -59,7 +66,8 @@ function parseDbSecretJson(raw: string): DbConfig {
     'Database config resolved from secret',
   );
 
-  return { host, port, database, user, password, schema, ssl: true };
+  const ssl = secret.ssl === false ? false : true;
+  return { host, port, database, user, password, schema, ssl };
 }
 
 /**
@@ -67,6 +75,13 @@ function parseDbSecretJson(raw: string): DbConfig {
  * Used when the env var contains an actual ARN (e.g. local dev against a real DB).
  */
 async function resolveSecretArn(arn: string): Promise<DbConfig> {
+  // Return cached result if this ARN was already resolved.
+  const cached = secretCache.get(arn);
+  if (cached) {
+    logger.info('Returning cached DB config for ARN');
+    return cached;
+  }
+
   // Dynamic import so that @aws-sdk/client-secrets-manager is only loaded when needed.
   const { SecretsManagerClient, GetSecretValueCommand } = await import(
     '@aws-sdk/client-secrets-manager'
@@ -81,7 +96,9 @@ async function resolveSecretArn(arn: string): Promise<DbConfig> {
     throw new Error('DATABASE_SECRET_ARN resolved but SecretString is empty');
   }
 
-  return parseDbSecretJson(response.SecretString);
+  const config = parseDbSecretJson(response.SecretString);
+  secretCache.set(arn, config);
+  return config;
 }
 
 /**
