@@ -122,9 +122,10 @@ describe('getDbConfig — DATABASE_SECRET_ARN path', () => {
     expect(getDbConfig().schema).toBe('env_override_schema');
   });
 
-  it('throws when DATABASE_SECRET_ARN is set but not valid JSON', () => {
+  it('throws when DATABASE_SECRET_ARN is set but not valid JSON or a bare ARN', () => {
     process.env.DATABASE_SECRET_ARN = 'not-json';
-    expect(() => getDbConfig()).toThrow('DATABASE_SECRET_ARN is set but could not be parsed as JSON');
+    // Non-JSON, non-`{`-prefixed values are treated as ARNs requiring initDb()
+    expect(() => getDbConfig()).toThrow('DATABASE_SECRET_ARN contains an ARN but initDb() was not called');
   });
 
   it('does not include password in the returned config info log', () => {
@@ -174,14 +175,11 @@ describe('getDbConfig — individual env vars path', () => {
 // ─── Non-local environment without config ─────────────────────────────────────
 
 describe('getDbConfig — non-local missing config warning', () => {
-  it('logs error when NODE_ENV is non-local and no DB config is set', () => {
-    process.env.NODE_ENV = 'dev';
-    // No DATABASE_URL, DATABASE_SECRET_ARN, or DB_HOST set.
-    // Should still return localhost defaults but log an error.
-    const config = getDbConfig();
-    expect(config.host).toBe('localhost'); // fallback still works
-    // The key behavior: logger.error is called. We verify structurally
-    // that the function does not throw (graceful) but does return defaults.
+  it('throws FATAL when NODE_ENV is non-local and no DB config is set', () => {
+    process.env.NODE_ENV = 'staging';
+    // No DATABASE_URL, DATABASE_SECRET_ARN, or DB_HOST set in a non-local env.
+    // The implementation throws to prevent silent localhost fallback in production.
+    expect(() => getDbConfig()).toThrow('FATAL: No database configuration found');
   });
 
   it('does NOT log error when NODE_ENV is development', () => {
