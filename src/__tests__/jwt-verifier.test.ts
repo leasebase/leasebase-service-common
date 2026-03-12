@@ -85,7 +85,7 @@ describe('valid tokens', () => {
       aud: TEST_CLIENT_ID,
       email: 'user@example.com',
       'custom:orgId': 'org-2',
-      'custom:role': 'ORG_ADMIN',
+      'custom:role': 'OWNER',
     });
 
     const result = await verifyToken(token, config);

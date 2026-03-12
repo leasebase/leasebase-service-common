@@ -3,10 +3,13 @@ import { UserRole, parsePagination, paginationMeta } from '../types';
 
 describe('UserRole', () => {
   it('has the correct values', () => {
-    expect(UserRole.ORG_ADMIN).toBe('ORG_ADMIN');
-    expect(UserRole.PM_STAFF).toBe('PM_STAFF');
     expect(UserRole.OWNER).toBe('OWNER');
     expect(UserRole.TENANT).toBe('TENANT');
+  });
+
+  it('has exactly two roles', () => {
+    const values = Object.values(UserRole);
+    expect(values).toEqual(['OWNER', 'TENANT']);
   });
 });
 
