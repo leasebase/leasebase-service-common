@@ -1,3 +1,17 @@
+# [1.2.0](https://github.com/leasebase/leasebase-service-common/compare/v1.1.1...v1.2.0) (2026-03-10)
+
+
+### Bug Fixes
+
+* enriched role priority, export getDbConfig, fix ssl parsing ([#13](https://github.com/leasebase/leasebase-service-common/issues/13)) ([4d43907](https://github.com/leasebase/leasebase-service-common/commit/4d4390775396acbc0890a23430195a3abc4ea806))
+* fail-closed auth — reject requests with no determinable role ([#8](https://github.com/leasebase/leasebase-service-common/issues/8)) ([4d3612a](https://github.com/leasebase/leasebase-service-common/commit/4d3612a1c1587bdc32f74ca6c66434dffecf8c6b))
+* remove duplicate enrichedRole declaration ([#11](https://github.com/leasebase/leasebase-service-common/issues/11)) ([37b0d09](https://github.com/leasebase/leasebase-service-common/commit/37b0d09d548e087bdab40eeb8813388fd3d4fd95))
+
+
+### Features
+
+* **db:** parse DATABASE_SECRET_ARN JSON for ECS DB connectivity ([#6](https://github.com/leasebase/leasebase-service-common/issues/6)) ([13c7c81](https://github.com/leasebase/leasebase-service-common/commit/13c7c816d959f627112f551c9a80cdd6a406101f))
+
 ## [1.1.1](https://github.com/leasebase/leasebase-service-common/compare/v1.1.0...v1.1.1) (2026-03-10)
 
 

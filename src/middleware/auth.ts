@@ -18,8 +18,12 @@ if (DEV_BYPASS) {
 
 /**
  * Middleware: require authentication.
+ *
  * Verifies the JWT Bearer token and attaches req.user.
- * Supports dev bypass mode via headers.
+ * FAIL-CLOSED: if the verified token does not carry `custom:role`,
+ * the request is rejected with 401 (no silent downgrade to TENANT).
+ *
+ * Supports dev bypass mode via headers (non-production only).
  */
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
   (async () => {
@@ -37,7 +41,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
             userId: 'dev-bypass',
             orgId,
             email,
-            role: (role.toUpperCase() as UserRole) || UserRole.TENANT,
+            role: role.toUpperCase() as UserRole,
             name: email,
             scopes: ['api/read', 'api/write', 'api/admin'],
           };
@@ -53,22 +57,33 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
       const token = authHeader.slice(7);
       const payload = await verifyToken(token);
 
-      // Role source: JWT custom:role claim only (BFF enrichment removed).
-      // Fail closed: if the JWT does not carry a role claim, reject the request.
+      // ── Role resolution (fail-closed) ──────────────────────────────────
+      // The ONLY accepted source of role is the JWT `custom:role` claim.
+      // Cognito ID tokens carry this claim; access tokens do not.
+      // If the token lacks `custom:role`, the request is rejected.
+      //
+      // The final auth authority model (token enrichment, session-based,
+      // etc.) will be decided separately. Until then, fail closed.
       const jwtRole = payload['custom:role'] as string | undefined;
 
       if (!jwtRole) {
-        throw new UnauthorizedError('Unable to determine user role');
+        logger.warn(
+          { sub: payload.sub, email: payload.email, token_use: payload.token_use },
+          'requireAuth: token missing custom:role claim — rejecting (fail-closed)',
+        );
+        throw new UnauthorizedError(
+          'Token missing required role claim. Ensure the correct token type is used.',
+        );
       }
 
-      const resolvedRole = jwtRole.toUpperCase() as UserRole;
+      const finalRole = jwtRole.toUpperCase() as UserRole;
 
       authReq.user = {
         sub: payload.sub,
         userId: payload.sub,
         orgId: (payload['custom:orgId'] as string) || '',
         email: (payload.email as string) || '',
-        role: resolvedRole,
+        role: finalRole,
         name: (payload.email as string) || '',
         scopes: payload.scope ? payload.scope.split(' ') : [],
       };

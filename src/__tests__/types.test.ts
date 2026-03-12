@@ -7,9 +7,9 @@ describe('UserRole', () => {
     expect(UserRole.TENANT).toBe('TENANT');
   });
 
-  it('does not contain legacy roles', () => {
-    expect('ORG_ADMIN' in UserRole).toBe(false);
-    expect('PM_STAFF' in UserRole).toBe(false);
+  it('has exactly two roles', () => {
+    const values = Object.values(UserRole);
+    expect(values).toEqual(['OWNER', 'TENANT']);
   });
 });
 

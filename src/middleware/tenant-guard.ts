@@ -4,7 +4,7 @@ import type { AuthenticatedRequest } from '../types';
 
 /**
  * Middleware: validate that the route's orgId (or query orgId) matches the user's orgId.
- * No cross-org access for anyone.
+ * No cross-org access for any role.
  */
 export function tenantGuard(req: Request, _res: Response, next: NextFunction): void {
   const user = (req as AuthenticatedRequest).user;

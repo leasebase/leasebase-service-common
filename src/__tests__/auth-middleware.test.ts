@@ -48,7 +48,7 @@ describe('requireRole', () => {
 
   it('returns unauthorized when no user', () => {
     const middleware = requireRole(UserRole.OWNER);
-    const req = mockReq();
+    const req = mockReq(); // no user set — need to remove it
     delete (req as any).user;
     const next = vi.fn();
     middleware(req, {} as Response, next);
