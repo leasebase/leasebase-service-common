@@ -91,7 +91,7 @@ describe('requireAuth — enriched role resolution', () => {
     expect(user.role).toBe(UserRole.OWNER);
   });
 
-  it('returns 401 when both JWT claim and enriched header are absent (fail closed)', async () => {
+  it('defaults to TENANT when both JWT claim and enriched header are absent (access token)', async () => {
     mockVerifyToken.mockResolvedValueOnce({
       sub: 'user-3',
       email: 'unknown@test.com',
@@ -110,11 +110,10 @@ describe('requireAuth — enriched role resolution', () => {
       });
     });
 
-    // next should be called with an UnauthorizedError (no silent TENANT fallback)
-    expect(next).toHaveBeenCalledTimes(1);
-    const error = next.mock.calls[0][0];
-    expect(error).toBeDefined();
-    expect(error.statusCode || error.status).toBe(401);
+    // next called without error — role defaults to TENANT for access tokens
+    expect(next).toHaveBeenCalledWith();
+    const user = (req as unknown as AuthenticatedRequest).user;
+    expect(user.role).toBe(UserRole.TENANT);
   });
 
   it('enriched-role header is case-insensitive (uppercased)', async () => {

@@ -54,16 +54,12 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
       const payload = await verifyToken(token);
 
       // Determine role: prefer BFF-enriched header (DB source of truth),
-      // then JWT claim. Fail closed if neither provides a role.
+      // then JWT custom:role claim. Default to TENANT when neither is
+      // present — Cognito access tokens lack custom attributes, so this
+      // fallback is expected for normal access-token auth flows.
       const jwtRole = payload['custom:role'] as string | undefined;
       const enrichedRole = req.headers['x-lb-enriched-role'] as string | undefined;
-      const rawRole = enrichedRole || jwtRole;
-
-      if (!rawRole) {
-        throw new UnauthorizedError('Unable to determine user role');
-      }
-
-      const resolvedRole = rawRole.toUpperCase() as UserRole;
+      const resolvedRole = (enrichedRole || jwtRole || UserRole.TENANT).toUpperCase() as UserRole;
 
       authReq.user = {
         sub: payload.sub,
