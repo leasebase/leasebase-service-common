@@ -116,8 +116,9 @@ describe('requireAuth — BFF role enrichment', () => {
     expect(user!.role).toBe(UserRole.ORG_ADMIN);
   });
 
-  it('rejects with 401 when no enriched header and no JWT custom:role (fail-closed)', async () => {
-    // No x-lb-enriched-role header and no custom:role in JWT → fail closed
+  it('defaults to TENANT when no enriched header and no JWT custom:role (access token)', async () => {
+    // No x-lb-enriched-role header and no custom:role in JWT
+    // → default to TENANT (Cognito access tokens lack custom attributes)
     mockVerifyToken.mockResolvedValueOnce({
       sub: 'user-789',
       email: 'new@org.com',
@@ -129,9 +130,11 @@ describe('requireAuth — BFF role enrichment', () => {
       // No x-lb-enriched-role header
     });
 
-    const { error } = await callRequireAuth(req);
+    const { user, error } = await callRequireAuth(req);
 
-    expect(error).toBeDefined();
+    expect(error).toBeUndefined();
+    expect(user).toBeDefined();
+    expect(user!.role).toBe(UserRole.TENANT);
   });
 
   it('uses JWT custom:role when present AND no enriched header', async () => {
