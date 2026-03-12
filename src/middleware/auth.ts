@@ -4,7 +4,6 @@ import { UnauthorizedError, ForbiddenError } from '../errors';
 import type { CurrentUser, AuthenticatedRequest } from '../types';
 import { UserRole } from '../types';
 import { logger } from '../logger';
-import { getCachedRole, setCachedRole, setCachedNegative } from './role-cache';
 
 const DEV_BYPASS = process.env.DEV_AUTH_BYPASS === 'true';
 
@@ -17,70 +16,14 @@ if (DEV_BYPASS) {
   logger.warn('⚠ DEV_AUTH_BYPASS is enabled — auth middleware will accept bypass headers');
 }
 
-// ── DB role fallback ─────────────────────────────────────────────────────────
-
-interface DbRoleResult {
-  role: string;
-  orgId: string;
-  source: 'db-cache' | 'db-lookup';
-}
-
-/**
- * Look up the user's role from the database by Cognito subject.
- *
- * Returns the role from cache if available, otherwise queries the User table.
- * On DB errors, returns `null` (caller falls back to TENANT default).
- * Never throws — errors are logged and swallowed.
- */
-async function resolveRoleFromDb(sub: string): Promise<DbRoleResult | null> {
-  // 1. Check in-process cache
-  const cached = getCachedRole(sub);
-  if (cached) {
-    if (cached.role === null) {
-      // Negative cache hit — user was not found recently
-      return null;
-    }
-    return { role: cached.role, orgId: cached.orgId, source: 'db-cache' };
-  }
-
-  // 2. Query DB
-  try {
-    // Late-import to avoid circular dependency and to tolerate services
-    // that may not have a DB configured (e.g. BFF gateway).
-    const { queryOne } = await import('../db');
-
-    const row = await queryOne<{ role: string; organizationId: string }>(
-      'SELECT "role", "organizationId" FROM "User" WHERE "cognitoSub" = $1',
-      [sub],
-    );
-
-    if (row) {
-      setCachedRole(sub, row.role, row.organizationId || '');
-      return { role: row.role, orgId: row.organizationId || '', source: 'db-lookup' };
-    }
-
-    // User not found — negative cache
-    setCachedNegative(sub);
-    logger.warn(
-      { sub },
-      'requireAuth DB fallback: no User row found for cognitoSub',
-    );
-    return null;
-  } catch (err) {
-    // DB error — log and continue without role.
-    // The caller will fall back to TENANT.
-    logger.warn(
-      { err, sub },
-      'requireAuth DB fallback: query failed — proceeding without DB role',
-    );
-    return null;
-  }
-}
-
 /**
  * Middleware: require authentication.
+ *
  * Verifies the JWT Bearer token and attaches req.user.
- * Supports dev bypass mode via headers.
+ * FAIL-CLOSED: if the verified token does not carry `custom:role`,
+ * the request is rejected with 401 (no silent downgrade to TENANT).
+ *
+ * Supports dev bypass mode via headers (non-production only).
  */
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
   (async () => {
@@ -98,7 +41,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
             userId: 'dev-bypass',
             orgId,
             email,
-            role: (role.toUpperCase() as UserRole) || UserRole.TENANT,
+            role: role.toUpperCase() as UserRole,
             name: email,
             scopes: ['api/read', 'api/write', 'api/admin'],
           };
@@ -114,56 +57,31 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
       const token = authHeader.slice(7);
       const payload = await verifyToken(token);
 
-      // ── Role resolution (priority order) ──────────────────────────────
-      // 1. x-lb-enriched-role header (trusted BFF/gateway)
-      // 2. JWT custom:role claim (present in Cognito ID tokens)
-      // 3. DB fallback by cognitoSub (access tokens lack custom attrs)
-      //    → cached in-process with 5-min TTL
-      // 4. TENANT default (only if DB is unavailable AND no cache)
+      // ── Role resolution (fail-closed) ──────────────────────────────────
+      // The ONLY accepted source of role is the JWT `custom:role` claim.
+      // Cognito ID tokens carry this claim; access tokens do not.
+      // If the token lacks `custom:role`, the request is rejected.
       //
-      // When a Cognito pre-token-generation Lambda is added later,
-      // the access token will carry custom:role and step 3 will
-      // never be reached.
+      // The final auth authority model (token enrichment, session-based,
+      // etc.) will be decided separately. Until then, fail closed.
       const jwtRole = payload['custom:role'] as string | undefined;
-      const enrichedRole = req.headers['x-lb-enriched-role'] as string | undefined;
 
-      let resolvedRole: string = enrichedRole || jwtRole || '';
-      let resolvedOrgId: string = (payload['custom:orgId'] as string) || '';
-      let roleSource: string = enrichedRole ? 'enriched-header' : jwtRole ? 'jwt-claim' : '';
-
-      // DB fallback: only when no role from header or JWT
-      if (!resolvedRole && payload.sub) {
-        const dbResult = await resolveRoleFromDb(payload.sub);
-        if (dbResult) {
-          resolvedRole = dbResult.role;
-          resolvedOrgId = dbResult.orgId || resolvedOrgId;
-          roleSource = dbResult.source;
-        }
-      }
-
-      // Final fallback to TENANT if nothing resolved
-      if (!resolvedRole) {
-        resolvedRole = UserRole.TENANT;
-        roleSource = 'default-fallback';
+      if (!jwtRole) {
         logger.warn(
-          { sub: payload.sub, email: payload.email },
-          'requireAuth: no role from header, JWT, or DB — defaulting to TENANT',
+          { sub: payload.sub, email: payload.email, token_use: payload.token_use },
+          'requireAuth: token missing custom:role claim — rejecting (fail-closed)',
+        );
+        throw new UnauthorizedError(
+          'Token missing required role claim. Ensure the correct token type is used.',
         );
       }
 
-      const finalRole = resolvedRole.toUpperCase() as UserRole;
-
-      if (roleSource === 'db-lookup' || roleSource === 'db-cache') {
-        logger.debug(
-          { sub: payload.sub, role: finalRole, source: roleSource },
-          'requireAuth: role resolved via DB fallback',
-        );
-      }
+      const finalRole = jwtRole.toUpperCase() as UserRole;
 
       authReq.user = {
         sub: payload.sub,
         userId: payload.sub,
-        orgId: resolvedOrgId,
+        orgId: (payload['custom:orgId'] as string) || '',
         email: (payload.email as string) || '',
         role: finalRole,
         name: (payload.email as string) || '',

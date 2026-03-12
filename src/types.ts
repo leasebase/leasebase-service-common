@@ -1,8 +1,6 @@
 import type { Request } from 'express';
 
 export enum UserRole {
-  ORG_ADMIN = 'ORG_ADMIN',
-  PM_STAFF = 'PM_STAFF',
   OWNER = 'OWNER',
   TENANT = 'TENANT',
 }

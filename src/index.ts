@@ -33,7 +33,6 @@ export type { JwtConfig, VerifiedToken } from './jwt-verifier';
 
 // Middleware
 export { requireAuth, requireRole, requireScope } from './middleware/auth';
-export { clearRoleCache, roleCacheSize } from './middleware/role-cache';
 export { tenantGuard } from './middleware/tenant-guard';
 export { correlationId } from './middleware/correlation-id';
 export { securityHeaders } from './middleware/security-headers';
