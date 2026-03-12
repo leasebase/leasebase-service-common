@@ -23,15 +23,15 @@ function mockReq(user?: Partial<AuthenticatedRequest['user']>): Request {
 
 describe('requireRole', () => {
   it('allows user with matching role', () => {
-    const middleware = requireRole(UserRole.ORG_ADMIN);
-    const req = mockReq({ role: UserRole.ORG_ADMIN });
+    const middleware = requireRole(UserRole.OWNER);
+    const req = mockReq({ role: UserRole.OWNER });
     const next = vi.fn();
     middleware(req, {} as Response, next);
     expect(next).toHaveBeenCalledWith();
   });
 
   it('rejects user with non-matching role', () => {
-    const middleware = requireRole(UserRole.ORG_ADMIN);
+    const middleware = requireRole(UserRole.OWNER);
     const req = mockReq({ role: UserRole.TENANT });
     const next = vi.fn();
     middleware(req, {} as Response, next);
@@ -39,16 +39,16 @@ describe('requireRole', () => {
   });
 
   it('allows any of multiple roles', () => {
-    const middleware = requireRole(UserRole.ORG_ADMIN, UserRole.PM_STAFF);
-    const req = mockReq({ role: UserRole.PM_STAFF });
+    const middleware = requireRole(UserRole.OWNER, UserRole.TENANT);
+    const req = mockReq({ role: UserRole.TENANT });
     const next = vi.fn();
     middleware(req, {} as Response, next);
     expect(next).toHaveBeenCalledWith();
   });
 
   it('returns unauthorized when no user', () => {
-    const middleware = requireRole(UserRole.ORG_ADMIN);
-    const req = mockReq(); // no user set — need to remove it
+    const middleware = requireRole(UserRole.OWNER);
+    const req = mockReq();
     delete (req as any).user;
     const next = vi.fn();
     middleware(req, {} as Response, next);

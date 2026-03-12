@@ -114,7 +114,7 @@ async function resolveSecretArn(arn: string): Promise<DbConfig> {
  * the function will throw if no explicit config is found — preventing silent
  * fallback to localhost.
  */
-function getDbConfig(): DbConfig {
+export function getDbConfig(): DbConfig {
   // Use cached config if already resolved (e.g. by initDb)
   if (resolvedConfig) return resolvedConfig;
 
