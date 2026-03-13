@@ -4,6 +4,7 @@ import { UnauthorizedError, ForbiddenError } from '../errors';
 import type { CurrentUser, AuthenticatedRequest } from '../types';
 import { UserRole } from '../types';
 import { logger } from '../logger';
+import { queryOne } from '../db';
 
 const DEV_BYPASS = process.env.DEV_AUTH_BYPASS === 'true';
 
@@ -87,6 +88,39 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
         name: (payload.email as string) || '',
         scopes: payload.scope ? payload.scope.split(' ') : [],
       };
+
+      // ── DB enrichment (fail-open) ─────────────────────────────────────
+      // Cognito tokens do not carry orgId. Look up the User row by
+      // cognitoSub to populate authoritative orgId, userId, name, and role.
+      // If the lookup fails (no DB, no row, error), keep JWT-derived values.
+      try {
+        const dbUser = await queryOne<{
+          id: string;
+          organizationId: string;
+          email: string;
+          name: string;
+          role: string;
+        }>(
+          `SELECT "id", "organizationId", "email", "name", "role" FROM "User" WHERE "cognitoSub" = $1`,
+          [payload.sub],
+        );
+
+        if (dbUser) {
+          authReq.user.userId = dbUser.id;
+          authReq.user.orgId = dbUser.organizationId || authReq.user.orgId;
+          authReq.user.email = dbUser.email || authReq.user.email;
+          authReq.user.name = dbUser.name || authReq.user.name;
+          if (dbUser.role) {
+            authReq.user.role = dbUser.role.toUpperCase() as UserRole;
+          }
+        }
+      } catch (enrichErr) {
+        // Non-fatal: continue with JWT-derived context.
+        logger.debug(
+          { err: enrichErr, sub: payload.sub },
+          'requireAuth: DB enrichment unavailable — using JWT-derived context',
+        );
+      }
 
       next();
     } catch (err) {
