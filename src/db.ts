@@ -1,4 +1,4 @@
-import { Pool, type PoolConfig } from 'pg';
+import { Pool, type PoolConfig, type PoolClient } from 'pg';
 import { logger } from './logger';
 
 let pool: Pool | null = null;
@@ -234,11 +234,50 @@ export function getPool(): Pool {
       logger.error({ err }, 'Unexpected database pool error');
     });
 
-    // Set search_path to service schema if specified
+    // Set search_path to service schema if specified.
+    //
+    // Why this approach:
+    // - RDS Proxy does not support PG command-line `options` (e.g. -c search_path=...).
+    // - pool.on('connect') cannot be awaited, which creates a race between
+    //   SET search_path and the first query on a new connection.
+    //
+    // Overriding pool.connect() ensures every acquired client has search_path set
+    // before control returns to callers (including pool.query() internals).
     if (config.schema) {
-      pool.on('connect', (client) => {
-        client.query(`SET search_path TO ${config.schema}, public`);
-      });
+      const searchPathSQL = `SET search_path TO ${config.schema}, public`;
+      const initializedClients = new WeakSet<PoolClient>();
+      const originalConnect = pool.connect.bind(pool);
+
+      pool.connect = ((callback?: unknown) => {
+        if (typeof callback === 'function') {
+          return (originalConnect as any)(
+            (err: unknown, client: PoolClient, done: (release?: unknown) => void) => {
+              if (err) {
+                (callback as any)(err, client, done);
+                return;
+              }
+
+              if (initializedClients.has(client)) {
+                (callback as any)(null, client, done);
+                return;
+              }
+
+              client.query(searchPathSQL, (setErr) => {
+                if (!setErr) initializedClients.add(client);
+                (callback as any)(setErr, client, done);
+              });
+            },
+          );
+        }
+
+        return (originalConnect as any)().then(async (client: PoolClient) => {
+          if (!initializedClients.has(client)) {
+            await client.query(searchPathSQL);
+            initializedClients.add(client);
+          }
+          return client;
+        });
+      }) as any;
     }
 
     logger.info(

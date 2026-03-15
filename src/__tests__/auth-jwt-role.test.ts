@@ -19,6 +19,11 @@ vi.mock('../jwt-verifier', () => ({
   setJwksForTesting: vi.fn(),
 }));
 
+// ── Mock DB (prevent real connections in unit tests) ─────────────────────────
+vi.mock('../db', () => ({
+  queryOne: vi.fn().mockResolvedValue(null),
+}));
+
 import { requireAuth } from '../middleware/auth';
 
 function mockReq(headers: Record<string, string> = {}): Request {
