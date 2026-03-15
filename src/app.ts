@@ -75,6 +75,18 @@ export async function startApp(app: Express): Promise<void> {
   const port = Number(process.env.PORT) || 3000;
   const serviceName = process.env.SERVICE_NAME || 'unknown';
 
+  // Log the resolved @leasebase/service-common version for drift detection.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pkg = require('@leasebase/service-common/package.json') as { version: string };
+    logger.info(
+      { serviceName, serviceCommonVersion: pkg.version },
+      `@leasebase/service-common v${pkg.version}`,
+    );
+  } catch {
+    logger.warn('Unable to read @leasebase/service-common version');
+  }
+
   // Pre-resolve DB credentials (safe no-op when no DB config is present)
   try {
     await initDb();

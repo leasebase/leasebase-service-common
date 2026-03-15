@@ -122,6 +122,22 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
         );
       }
 
+      // ── Guardrail: warn when orgId is empty after enrichment ────────
+      // If a non-TENANT authenticated user ends up with an empty orgId,
+      // something is wrong (missing DB enrichment, missing JWT claim, or
+      // DB row without organizationId). Log a warning so it's visible.
+      if (!authReq.user.orgId && authReq.user.role !== UserRole.TENANT) {
+        logger.warn(
+          {
+            sub: authReq.user.sub,
+            role: authReq.user.role,
+            email: authReq.user.email,
+            userId: authReq.user.userId,
+          },
+          'requireAuth: orgId is empty after enrichment — requests requiring org context will fail',
+        );
+      }
+
       next();
     } catch (err) {
       if (err instanceof UnauthorizedError) {
