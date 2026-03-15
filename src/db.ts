@@ -226,12 +226,6 @@ export function getPool(): Pool {
           password: config.password,
           max: 10,
           ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
-          // Set search_path at protocol level to avoid race condition with
-          // the non-awaitable pool.on('connect') callback (pg deprecation
-          // warning for concurrent client.query calls).
-          ...(config.schema
-            ? { options: `-c search_path=${config.schema},public` }
-            : {}),
         };
 
     pool = new Pool(poolConfig);
@@ -239,6 +233,13 @@ export function getPool(): Pool {
     pool.on('error', (err) => {
       logger.error({ err }, 'Unexpected database pool error');
     });
+
+    // Set search_path to service schema if specified
+    if (config.schema) {
+      pool.on('connect', (client) => {
+        client.query(`SET search_path TO ${config.schema}, public`);
+      });
+    }
 
     logger.info(
       { host: config.host || 'url', schema: config.schema },
